@@ -34,7 +34,6 @@ def lineplot(xs, ys_population, title, path='', xaxis='episode'):
     'layout': dict(title=title, xaxis={'title': xaxis}, yaxis={'title': title})
   }, filename=os.path.join(path, title + '.html'), auto_open=False)
 
-
 def write_video(frames, title, path=''):
   frames = np.multiply(np.stack(frames, axis=0).transpose(0, 2, 3, 1), 255).clip(0, 255).astype(np.uint8)[:, :, :, ::-1]  # VideoWrite expects H x W x C in BGR
   _, H, W, _ = frames.shape
@@ -146,7 +145,7 @@ def compute_intrinsic_reward(beliefs, actions, onestep_models):
 #   amount *= self._c.action_beta
 #   value = self._c.action_beta_dims_value
 #   if value and value < 0:
-#     amount /= value * float(pred.event_shape[-1].value)
+#     amount /= value * float(pred.event_shape[sd-1].value)
 #   if value and value > 0:
 #     amount *= value * float(pred.event_shape[-1].value)
 #   # print("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< amount",amount)
