@@ -1,4 +1,4 @@
-Plan-to-Explore implementation in PyTorch (Again)
+Plan-to-Explore implementation in PyTorch (Again2)
 ======
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
