@@ -89,9 +89,9 @@ results_dir = os.path.join('results', '{}_{}'.format(args.env, args.id))
 os.makedirs(results_dir, exist_ok=True)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
-if torch.cuda.is_available() and not args.disable_cuda:
+if torch.backends.mps.is_available() and not args.disable_cuda:
   print("using CUDA")
-  args.device = torch.device('cuda')
+  args.device = torch.device('mps')
   torch.cuda.manual_seed(args.seed)
 else:
   print("using CPU")
@@ -305,7 +305,7 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
         pred_indices = sample_with_replacement[mdl,:].reshape(onestep_batch_size, 1, 1).expand(onestep_batch_size, onestep_batch_size, obs_feature_size)
         belief_indices = sample_with_replacement[mdl,:].reshape(onestep_batch_size, 1, 1).expand(onestep_batch_size, onestep_batch_size, belief_feature_size)
         input_action = torch.gather(onestep_actions, 0, action_indices)
-        print("here: ", onestep_beliefs.shape, belief_indices.shape)
+        #print("here: ", onestep_beliefs.shape, belief_indices.shape)
 
         input_state = torch.gather(onestep_beliefs, 0, belief_indices)
         target_prediction = torch.gather(onestep_embed, 0, pred_indices)
