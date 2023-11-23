@@ -6,6 +6,7 @@
 
 ## Training vs. Testing?
 - Is there a difference of zero-shot learning in RL domain vs. supervised classification domain?
+- see "Survey of Zero-shot Generalisation in Deep RL": https://www.jair.org/index.php/jair/article/view/14174/26890
 
 ## How is the world model used? 
     - How it is used during training?
