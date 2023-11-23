@@ -99,7 +99,7 @@ class OneStepModel(jit.ScriptModule):
     hidden = self.act_fn(self.fc2(hidden))
     hidden = torch.cat([hidden, prev_action], dim=-1) 
     mean = self.fc3(hidden)
-    dist = Normal(mean, torch.zeros_like(mean).to('cuda'))
+    dist = Normal(mean, torch.zeros_like(mean).to('mps') + 1e05)
     dist = torch.distributions.Independent(dist, 1)
     return dist
 
@@ -189,6 +189,7 @@ class ValueModel(jit.ScriptModule):
     reward = self.fc4(hidden).squeeze(dim=1)
     return reward
 
+
 class ActorModel(jit.ScriptModule):
   def __init__(self, belief_size, state_size, hidden_size, action_size, dist='tanh_normal',
                 activation_function='elu', min_std=1e-4, init_std=5, mean_scale=5):
@@ -231,6 +232,7 @@ class ActorModel(jit.ScriptModule):
     else: return dist.rsample()
 
 
+
 class SymbolicEncoder(jit.ScriptModule):
   def __init__(self, observation_size, embedding_size, activation_function='relu'):
     super().__init__()
@@ -246,7 +248,6 @@ class SymbolicEncoder(jit.ScriptModule):
     hidden = self.act_fn(self.fc2(hidden))
     hidden = self.fc3(hidden)
     return hidden
-
 
 class VisualEncoder(jit.ScriptModule):
   __constants__ = ['embedding_size']
@@ -272,13 +273,11 @@ class VisualEncoder(jit.ScriptModule):
     hidden = self.fc(hidden)  # Identity if embedding size is 1024 else linear projection
     return hidden
 
-
 def Encoder(symbolic, observation_size, embedding_size, activation_function='relu'):
   if symbolic:
     return SymbolicEncoder(observation_size, embedding_size, activation_function)
   else:
     return VisualEncoder(embedding_size, activation_function)
-
 
 def atanh(x):
     return 0.5 * torch.log((1 + x) / (1 - x))
@@ -287,6 +286,8 @@ class TanhBijector(torch.distributions.Transform):
     def __init__(self):
         super().__init__()
         self.bijective = True
+        self.domain = torch.distributions.constraints.Constraint()
+        self.codomain = torch.distributions.constraints.Constraint()
 
     @property
     def sign(self):
@@ -306,7 +307,6 @@ class TanhBijector(torch.distributions.Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return 2. * (np.log(2) - x - F.softplus(-2. * x))
-
 
 class SampleDist:
 
