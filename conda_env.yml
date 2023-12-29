@@ -1,6 +1,6 @@
 name: p2e
 channels:
-  - pytorch
+  - cl
   - defaults
   - conda-forge
 dependencies:

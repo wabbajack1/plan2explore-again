@@ -16,6 +16,8 @@ from utils import lineplot, write_video, imagine_ahead, lambda_return, compute_i
 from tensorboardX import SummaryWriter
 
 
+
+
 # Hyperparameters
 parser = argparse.ArgumentParser(description='PlaNet, Dreamer or plan2explore')
 parser.add_argument('--algo', type=str, default='p2e', help='planet, dreamer or p2e')
@@ -84,7 +86,8 @@ for k, v in vars(args).items():
   print(' ' * 26 + k + ': ' + str(v))
 
 
-# Setup
+
+############ SETUP ############
 results_dir = os.path.join('results', '{}_{}'.format(args.env, args.id))
 os.makedirs(results_dir, exist_ok=True)
 np.random.seed(args.seed)
@@ -103,7 +106,7 @@ metrics = {'steps': [], 'episodes': [], 'train_rewards': [], 'test_episodes': []
 summary_name = results_dir + "/{}_{}_log"
 writer = SummaryWriter(summary_name.format(args.env, args.id))
 
-# Initialise training environment and experience replay memory
+############ Init training environment and experience replay memory ############
 env = Env(args.env, args.symbolic_env, args.seed, args.max_episode_length, args.action_repeat, args.bit_depth)
 if args.experience_replay is not '' and os.path.exists(args.experience_replay):
   D = torch.load(args.experience_replay)
@@ -122,8 +125,7 @@ elif not args.test:
     metrics['steps'].append(t * args.action_repeat + (0 if len(metrics['steps']) == 0 else metrics['steps'][-1]))
     metrics['episodes'].append(s)
 
-
-# Initialise model parameters randomly
+############ Initialise model parameters randomly ############
 transition_model = TransitionModel(args.belief_size, args.state_size, env.action_size, args.hidden_size, args.embedding_size, args.dense_activation_function).to(device=args.device)
 observation_model = ObservationModel(args.symbolic_env, env.observation_size, args.belief_size, args.state_size, args.embedding_size, args.cnn_activation_function).to(device=args.device)
 reward_model = RewardModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
@@ -137,7 +139,7 @@ if args.algo=="dreamer" or args.algo=="p2e":
 if args.algo=="p2e":
   curious_actor_model = ActorModel(args.belief_size, args.state_size, args.hidden_size, env.action_size, args.dense_activation_function).to(device=args.device)
   curious_value_model = ValueModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
-  onestep_models = [OneStepModel(args.belief_size, env.action_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
+  onestep_models = [OneStepModel(args.belief_size, args.belief_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
   onestep_param_list = []
   for x in onestep_models: onestep_param_list += list(x.parameters())
   onestep_modules = []
