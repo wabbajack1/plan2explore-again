@@ -8,7 +8,6 @@ from torch.distributions.transforms import Transform, TanhTransform
 from torch.distributions.transformed_distribution import TransformedDistribution
 import numpy as np
 
-
 # Wraps the input tuple for a function to process a time x batch x features sequence in batch x features (assumes one output)
 def bottle(f, x_tuple):
   x_sizes = tuple(map(lambda x: x.size(), x_tuple))
@@ -16,7 +15,6 @@ def bottle(f, x_tuple):
   y_size = y.size()
   output = y.view(x_sizes[0][0], x_sizes[0][1], *y_size[1:])
   return output
-
 
 class TransitionModel(jit.ScriptModule):
   __constants__ = ['min_std_dev']
@@ -119,7 +117,6 @@ class SymbolicObservationModel(jit.ScriptModule):
     observation = self.fc3(hidden)
     return observation
 
-
 class VisualObservationModel(jit.ScriptModule):
   __constants__ = ['embedding_size']
   
@@ -144,13 +141,11 @@ class VisualObservationModel(jit.ScriptModule):
     observation = self.conv4(hidden)
     return observation
 
-
 def ObservationModel(symbolic, observation_size, belief_size, state_size, embedding_size, activation_function='relu'):
   if symbolic:
     return SymbolicObservationModel(observation_size, belief_size, state_size, embedding_size, activation_function)
   else:
     return VisualObservationModel(belief_size, state_size, embedding_size, activation_function)
-
 
 class RewardModel(jit.ScriptModule):
   def __init__(self, belief_size, state_size, hidden_size, activation_function='relu'):
@@ -188,7 +183,6 @@ class ValueModel(jit.ScriptModule):
     hidden = self.act_fn(self.fc3(hidden))
     reward = self.fc4(hidden).squeeze(dim=1)
     return reward
-
 
 class ActorModel(jit.ScriptModule):
   def __init__(self, belief_size, state_size, hidden_size, action_size, dist='tanh_normal',
@@ -230,8 +224,6 @@ class ActorModel(jit.ScriptModule):
     dist = SampleDist(dist)
     if det: return dist.mode()
     else: return dist.rsample()
-
-
 
 class SymbolicEncoder(jit.ScriptModule):
   def __init__(self, observation_size, embedding_size, activation_function='relu'):

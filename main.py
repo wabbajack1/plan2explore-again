@@ -139,7 +139,8 @@ if args.algo=="dreamer" or args.algo=="p2e":
 if args.algo=="p2e":
   curious_actor_model = ActorModel(args.belief_size, args.state_size, args.hidden_size, env.action_size, args.dense_activation_function).to(device=args.device)
   curious_value_model = ValueModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
-  onestep_models = [OneStepModel(args.belief_size, args.belief_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
+  onestep_models = [OneStepModel(args.belief_size, env.action_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
+  #onestep_models = [OneStepModel(args.belief_size, args.belief_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
   onestep_param_list = []
   for x in onestep_models: onestep_param_list += list(x.parameters())
   onestep_modules = []
@@ -307,17 +308,18 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
         pred_indices = sample_with_replacement[mdl,:].reshape(onestep_batch_size, 1, 1).expand(onestep_batch_size, onestep_batch_size, obs_feature_size)
         belief_indices = sample_with_replacement[mdl,:].reshape(onestep_batch_size, 1, 1).expand(onestep_batch_size, onestep_batch_size, belief_feature_size)
         input_action = torch.gather(onestep_actions, 0, action_indices)
-        #print("here: ", onestep_beliefs.shape, belief_indices.shape)
 
         input_state = torch.gather(onestep_beliefs, 0, belief_indices)
         target_prediction = torch.gather(onestep_embed, 0, pred_indices)
+
+        print("--->", input_state.shape, input_action.shape)
         prediction = onestep_models[mdl](input_state, input_action)
         prediction = prediction.mean
         loss = ((prediction - target_prediction.detach()) ** 2).mean(axis=[0,1])
         loss *= args.ensemble_loss_scale
         onestep_loss = loss.mean()
         onestep_optimizer.zero_grad()
-        onestep_loss.backward()
+        onestep_loss.backward(c)
         nn.utils.clip_grad_norm_(onestep_param_list, args.grad_clip_norm, norm_type=2)
         onestep_optimizer.step()
       
