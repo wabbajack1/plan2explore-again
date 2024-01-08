@@ -95,7 +95,7 @@ torch.manual_seed(args.seed)
 if torch.backends.mps.is_available() and not args.disable_cuda:
   print("using CUDA")
   args.device = torch.device('mps')
-  torch.cuda.manual_seed(args.seed)
+  # torch.cuda.manual_seed(args.seed)
 else:
   print("using CPU")
   args.device = torch.device('cpu')
@@ -108,7 +108,7 @@ writer = SummaryWriter(summary_name.format(args.env, args.id))
 
 ############ Init training environment and experience replay memory ############
 env = Env(args.env, args.symbolic_env, args.seed, args.max_episode_length, args.action_repeat, args.bit_depth)
-if args.experience_replay is not '' and os.path.exists(args.experience_replay):
+if args.experience_replay != '' and os.path.exists(args.experience_replay):
   D = torch.load(args.experience_replay)
   metrics['steps'], metrics['episodes'] = [D.steps] * D.episodes, list(range(1, D.episodes + 1))
 elif not args.test:
@@ -125,6 +125,9 @@ elif not args.test:
     metrics['steps'].append(t * args.action_repeat + (0 if len(metrics['steps']) == 0 else metrics['steps'][-1]))
     metrics['episodes'].append(s)
 
+print(metrics['episodes'])
+print(metrics['steps'])
+
 ############ Initialise model parameters randomly ############
 transition_model = TransitionModel(args.belief_size, args.state_size, env.action_size, args.hidden_size, args.embedding_size, args.dense_activation_function).to(device=args.device)
 observation_model = ObservationModel(args.symbolic_env, env.observation_size, args.belief_size, args.state_size, args.embedding_size, args.cnn_activation_function).to(device=args.device)
@@ -139,8 +142,8 @@ if args.algo=="dreamer" or args.algo=="p2e":
 if args.algo=="p2e":
   curious_actor_model = ActorModel(args.belief_size, args.state_size, args.hidden_size, env.action_size, args.dense_activation_function).to(device=args.device)
   curious_value_model = ValueModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
-  onestep_models = [OneStepModel(args.belief_size, env.action_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
-  #onestep_models = [OneStepModel(args.belief_size, args.belief_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
+  # onestep_models = [OneStepModel(args.belief_size, env.action_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
+  onestep_models = [OneStepModel(args.belief_size, args.belief_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)] #@change
   onestep_param_list = []
   for x in onestep_models: onestep_param_list += list(x.parameters())
   onestep_modules = []
@@ -153,7 +156,7 @@ if args.algo=="p2e":
   curious_actor_optimizer = optim.Adam(actor_model.parameters(), lr=0 if args.learning_rate_schedule != 0 else args.actor_learning_rate, eps=args.adam_epsilon)
   curious_value_optimizer = optim.Adam(value_model.parameters(), lr=0 if args.learning_rate_schedule != 0 else args.value_learning_rate, eps=args.adam_epsilon)
   onestep_optimizer = optim.Adam(onestep_param_list, lr=0 if args.learning_rate_schedule != 0 else args.disagreement_learning_rate, eps=args.adam_epsilon)
-if args.models is not '' and os.path.exists(args.models):
+if args.models != '' and os.path.exists(args.models):
   model_dicts = torch.load(args.models)
   transition_model.load_state_dict(model_dicts['transition_model'])
   observation_model.load_state_dict(model_dicts['observation_model'])
@@ -171,7 +174,7 @@ if args.algo=="dreamer":
   print("DREAMER")
   planner = actor_model
 elif args.algo=="p2e":
-  print("Plan2Explore") 
+  print("Plan2Explore")
   planner = actor_model
   curious_planner = curious_actor_model
 else:
@@ -185,6 +188,7 @@ def update_belief_and_act(args, env, planner, transition_model, encoder, belief,
   belief, _, _, _, posterior_state, _, _ = transition_model(posterior_state, action.unsqueeze(dim=0), belief, encoder(observation).unsqueeze(dim=0))  # Action and observation need extra time dimension
   belief, posterior_state = belief.squeeze(dim=0), posterior_state.squeeze(dim=0)  # Remove time dimension from belief/state
   if args.algo=="dreamer" or args.algo=="p2e":
+    print("update belief")
     action = planner.get_action(belief, posterior_state, det=not(explore))
   else:
     action = planner(belief, posterior_state)  # Get action from planner(q(s_t|o≤t,a<t), p)
@@ -220,6 +224,7 @@ if args.test:
   quit()
 
 
+
 # Training (and testing)
 for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total=args.episodes, initial=metrics['episodes'][-1] + 1):
   # Model fitting
@@ -230,14 +235,17 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
   for s in tqdm(range(args.collect_interval)):
     # Draw sequence chunks {(o_t, a_t, r_t+1, terminal_t+1)} ~ D uniformly at random from the dataset (including terminal flags)
     observations, actions, rewards, nonterminals = D.sample(args.batch_size, args.chunk_size) # Transitions start at time t = 0
+    print(observations.shape)
     # Create initial belief and state for time t = 0
     init_belief, init_state = torch.zeros(args.batch_size, args.belief_size, device=args.device), torch.zeros(args.batch_size, args.state_size, device=args.device)
     # Update belief/state using posterior from previous belief/state, previous action and current observation (over entire sequence at once)
     beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = transition_model(init_state, actions[:-1], init_belief, bottle(encoder, (observations[1:], )), nonterminals[:-1])
+    print("---->", init_belief.shape, beliefs.shape)
     # Calculate observation likelihood, reward likelihood and KL losses (for t = 0 only for latent overshooting); sum over final dims, average over batch and time (original implementation, though paper seems to miss 1/T scaling?)
     if args.worldmodel_MSEloss:
       observation_loss = F.mse_loss(bottle(observation_model, (beliefs, posterior_states)), observations[1:], reduction='none').sum(dim=2 if args.symbolic_env else (2, 3, 4)).mean(dim=(0, 1))
     else:
+      # print("----->", bottle(observation_model, (beliefs, posterior_states)).shape)
       observation_dist = Normal(bottle(observation_model, (beliefs, posterior_states)), 1)
       observation_loss = -observation_dist.log_prob(observations[1:]).sum(dim=2 if args.symbolic_env else (2, 3, 4)).mean(dim=(0, 1))
     if args.algo == "p2e":
@@ -292,34 +300,51 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
     if args.algo=="p2e":
       #Plan2explore implementation: onestep model loss calculation and optimization
       with torch.no_grad():
+        print(actions.shape, observations.shape, beliefs.shape)
         onestep_actions = actions.detach()
         onestep_obs = observations.detach()
         onestep_beliefs = beliefs.detach()
+      
+      first_belief = onestep_beliefs[1:]
+      second_belief = onestep_beliefs[:-1]
+
       onestep_batch_size = onestep_actions.size(1)
       action_feature_size = onestep_actions.size(2)
       obs_feature_size = args.embedding_size
       belief_feature_size = onestep_beliefs.size(2)
+      
       with FreezeParameters(model_modules):
         onestep_embed = bottle(encoder, (onestep_obs, ))
       bagging_size = args.batch_size
       sample_with_replacement = torch.Tensor(args.onestep_num, bagging_size).uniform_(0,args.batch_size).type(torch.int64).to(device=args.device)
+
       for mdl in range(len(onestep_models)):
+        # indices
         action_indices = sample_with_replacement[mdl,:].reshape(onestep_batch_size, 1, 1).expand(onestep_batch_size, onestep_batch_size, action_feature_size)
         pred_indices = sample_with_replacement[mdl,:].reshape(onestep_batch_size, 1, 1).expand(onestep_batch_size, onestep_batch_size, obs_feature_size)
         belief_indices = sample_with_replacement[mdl,:].reshape(onestep_batch_size, 1, 1).expand(onestep_batch_size, onestep_batch_size, belief_feature_size)
-        input_action = torch.gather(onestep_actions, 0, action_indices)
-
-        input_state = torch.gather(onestep_beliefs, 0, belief_indices)
+        
+        # data creation
+        # input_action = torch.gather(onestep_actions, 0, action_indices)
+        # input_state = torch.gather(onestep_beliefs, 0, belief_indices)
+        input_state_first = torch.gather(first_belief, 0, belief_indices)
+        input_state_second = torch.gather(second_belief, 0, belief_indices)
+        # target_prediction = torch.gather(onestep_embed, 0, pred_indices)
         target_prediction = torch.gather(onestep_embed, 0, pred_indices)
+        target_action_prediction = torch.gather(onestep_actions, 0, action_indices)
 
-        print("--->", input_state.shape, input_action.shape)
-        prediction = onestep_models[mdl](input_state, input_action)
+        # print("--->", input_state[:-1].shape, input_state[1:].shape, input_action.shape)
+        # prediction = onestep_models[mdl](input_state[-1:], input_action)
+        print(f"input shape is {input_state_first.shape, input_state_second.shape}")
+        prediction = onestep_models[mdl](input_state_first, input_state_second)
         prediction = prediction.mean
-        loss = ((prediction - target_prediction.detach()) ** 2).mean(axis=[0,1])
+        print("------+++++----->", target_action_prediction.shape, prediction.shape)
+
+        loss = ((prediction - target_action_prediction.detach()) ** 2).mean(axis=[0,1])
         loss *= args.ensemble_loss_scale
         onestep_loss = loss.mean()
         onestep_optimizer.zero_grad()
-        onestep_loss.backward(c)
+        onestep_loss.backward()
         nn.utils.clip_grad_norm_(onestep_param_list, args.grad_clip_norm, norm_type=2)
         onestep_optimizer.step()
       
@@ -330,10 +355,12 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
       with FreezeParameters(model_modules):
         curious_imagination_traj = imagine_ahead(curious_actor_states, curious_actor_beliefs, curious_actor_model, transition_model, args.planning_horizon)
       curious_imged_beliefs, curious_imged_prior_states, curious_imged_prior_means, curious_imged_prior_std_devs, curious_imged_actions = curious_imagination_traj
+      print(curious_imged_beliefs.shape, curious_imged_prior_states.shape)
       with FreezeParameters(model_modules + value_model.modules + onestep_modules):
-        curious_reward = compute_intrinsic_reward(curious_imged_beliefs, curious_imged_actions, onestep_models)
+        curious_reward = compute_intrinsic_reward(curious_imged_beliefs[1:], curious_imged_beliefs[:-1], onestep_models) # @change for implementation of inverse module
         curious_value_pred = bottle(value_model, (curious_imged_beliefs, curious_imged_prior_states))
-      curious_returns = lambda_return(curious_reward, curious_value_pred, bootstrap=curious_value_pred[-1], discount=args.discount, lambda_=args.disclam)
+
+      curious_returns = lambda_return(curious_reward, curious_value_pred[:-1], bootstrap=curious_value_pred[:-1][-1], discount=args.discount, lambda_=args.disclam)
       curious_actor_loss = -torch.mean(curious_returns)
       # Update model parameters
       curious_actor_optimizer.zero_grad()
@@ -343,8 +370,8 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
 
       #Plan2explore implementation: curious_value model loss calculation and optimization
       with torch.no_grad():
-        curious_value_beliefs = curious_imged_beliefs.detach()
-        curious_value_prior_states = curious_imged_prior_states.detach()
+        curious_value_beliefs = curious_imged_beliefs.detach()[:-1]
+        curious_value_prior_states = curious_imged_prior_states.detach()[:-1]
         curious_target_return = curious_returns.detach()
       curious_value_dist = Normal(bottle(curious_value_model, (curious_value_beliefs, curious_value_prior_states)),1) # detach the input tensor from the transition network.
       curious_value_loss = -curious_value_dist.log_prob(curious_target_return).mean(dim=(0, 1)) 
@@ -442,7 +469,7 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
     belief, posterior_state, action = torch.zeros(1, args.belief_size, device=args.device), torch.zeros(1, args.state_size, device=args.device), torch.zeros(1, env.action_size, device=args.device)
     pbar = tqdm(range(args.max_episode_length // args.action_repeat))
     for t in pbar:
-      # print("step",t)
+      print("step",t)
       belief, posterior_state, action, next_observation, reward, done = update_belief_and_act(args, env, policy, transition_model, encoder, belief, posterior_state, action, observation.to(device=args.device), explore=True)
       D.append(observation, action.cpu(), reward, done)
       total_reward += reward

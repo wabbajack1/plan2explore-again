@@ -53,7 +53,7 @@ class TransitionModel(jit.ScriptModule):
     beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T, [torch.empty(0)] * T
     beliefs[0], prior_states[0], posterior_states[0] = prev_belief, prev_state, prev_state
     # Loop over time sequence
-    for t in range(T - 1):
+    for t in range(T-1):
       _state = prior_states[t] if observations is None else posterior_states[t]  # Select appropriate previous state
       _state = _state if nonterminals is None else _state * nonterminals[t]  # Mask if previous transition was terminal
       # Compute belief (deterministic hidden state)
@@ -77,6 +77,74 @@ class TransitionModel(jit.ScriptModule):
       hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0)]
     return hidden
 
+# # old implementation
+# class OneStepModel(jit.ScriptModule):
+#   def __init__(self, state_size, action_size, embedding_size, activation_function='relu', model_width_factor=1):
+#     super().__init__()
+#     self.act_fn = getattr(F, activation_function)
+#     self.embedding_size = embedding_size
+#     self.hidden_size = embedding_size*model_width_factor
+#     self.fc1 = nn.Linear(state_size + action_size, self.hidden_size)
+#     self.fc2 = nn.Linear(self.hidden_size + action_size, self.hidden_size)
+#     self.fc3 = nn.Linear(self.hidden_size + action_size, embedding_size)
+#     self.modules = [self.fc1, self.fc2, self.fc3]
+
+#   def __call__(self, prev_state, prev_action):
+#     prev_state = prev_state.detach()
+#     prev_action = prev_action.detach() 
+#     x = torch.cat([prev_state, prev_action], dim=-1) #torch.Size([49, 50, 30]) torch.Size([49, 50, 6])
+#     hidden = self.act_fn(self.fc1(x))
+#     hidden = torch.cat([hidden, prev_action], dim=-1)
+#     hidden = self.act_fn(self.fc2(hidden))
+#     hidden = torch.cat([hidden, prev_action], dim=-1) 
+#     mean = self.fc3(hidden)
+#     dist = Normal(mean, torch.zeros_like(mean).to('mps') + 1e05)
+#     dist = torch.distributions.Independent(dist, 1)
+#     return dist
+  
+# class OneStepModel(jit.ScriptModule):
+#   def __init__(self, state_size, action_size, embedding_size, activation_function='relu', model_width_factor=1, min_std=1e-4, init_std=5, mean_scale=5, dist='tanh_normal'):
+#     super().__init__()
+#     self.act_fn = getattr(F, activation_function)
+#     self.embedding_size = embedding_size
+#     self.hidden_size = embedding_size*model_width_factor
+#     self.fc1 = nn.Linear(state_size + action_size, self.hidden_size)
+#     self.fc2 = nn.Linear(self.hidden_size + action_size, self.hidden_size)
+#     #elf.fc3 = nn.Linear(self.hidden_size + action_size, embedding_size)
+#     self.fc3 = nn.Linear(self.hidden_size + action_size, 2*action_size)
+#     self.modules = [self.fc1, self.fc2, self.fc3]
+
+#     self._dist = dist
+#     self._min_std = min_std
+#     self._init_std = init_std
+#     self._mean_scale = mean_scale
+
+#   def __call__(self, prev_state, prev_action):
+#     raw_init_std = torch.log(torch.exp(torch.tensor(self._init_std)) - 1)
+#     prev_state = prev_state.detach()
+#     prev_action = prev_action.detach() 
+#     x = torch.cat([prev_state, prev_action], dim=-1) #torch.Size([49, 50, 30]) torch.Size([49, 50, 6])
+#     hidden = self.act_fn(self.fc1(x))
+#     hidden = torch.cat([hidden, prev_action], dim=-1)
+#     hidden = self.act_fn(self.fc2(hidden))
+#     hidden = torch.cat([hidden, prev_action], dim=-1) 
+#     action = self.fc3(hidden).squeeze(dim=1)
+
+#     action_mean, action_std_dev = torch.chunk(action, 2, dim=1)
+#     action_mean = self._mean_scale * torch.tanh(action_mean / self._mean_scale)
+#     action_std = F.softplus(action_std_dev + raw_init_std) + self._min_std
+
+#     # dist = Normal(action_mean, action_std)
+#     # dist = TransformedDistribution(dist, TanhBijector())
+#     # dist = torch.distributions.Independent(dist,1)
+#     # dist = SampleDist(dist)
+
+#     dist = Normal(action_mean, action_std)
+#     dist = torch.distributions.Independent(dist, 1)
+
+#     return dist
+  
+# old implementation
 class OneStepModel(jit.ScriptModule):
   def __init__(self, state_size, action_size, embedding_size, activation_function='relu', model_width_factor=1):
     super().__init__()
@@ -85,7 +153,7 @@ class OneStepModel(jit.ScriptModule):
     self.hidden_size = embedding_size*model_width_factor
     self.fc1 = nn.Linear(state_size + action_size, self.hidden_size)
     self.fc2 = nn.Linear(self.hidden_size + action_size, self.hidden_size)
-    self.fc3 = nn.Linear(self.hidden_size + action_size, embedding_size)
+    self.fc3 = nn.Linear(self.hidden_size + action_size, 1)
     self.modules = [self.fc1, self.fc2, self.fc3]
 
   def __call__(self, prev_state, prev_action):
