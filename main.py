@@ -235,7 +235,7 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
   for s in tqdm(range(args.collect_interval)):
     # Draw sequence chunks {(o_t, a_t, r_t+1, terminal_t+1)} ~ D uniformly at random from the dataset (including terminal flags)
     observations, actions, rewards, nonterminals = D.sample(args.batch_size, args.chunk_size) # Transitions start at time t = 0
-    print(observations.shape)
+    print(observations[1:].shape)
     # Create initial belief and state for time t = 0
     init_belief, init_state = torch.zeros(args.batch_size, args.belief_size, device=args.device), torch.zeros(args.batch_size, args.state_size, device=args.device)
     # Update belief/state using posterior from previous belief/state, previous action and current observation (over entire sequence at once)
@@ -335,11 +335,10 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
 
         # print("--->", input_state[:-1].shape, input_state[1:].shape, input_action.shape)
         # prediction = onestep_models[mdl](input_state[-1:], input_action)
-        print(f"input shape is {input_state_first.shape, input_state_second.shape}")
+        # print(f"input shape is {input_state_first.shape, input_state_second.shape}")
         prediction = onestep_models[mdl](input_state_first, input_state_second)
         prediction = prediction.mean
         print("------+++++----->", target_action_prediction.shape, prediction.shape)
-
         loss = ((prediction - target_action_prediction.detach()) ** 2).mean(axis=[0,1])
         loss *= args.ensemble_loss_scale
         onestep_loss = loss.mean()
