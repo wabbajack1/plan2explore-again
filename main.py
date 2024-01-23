@@ -15,7 +15,12 @@ from planner import MPCPlanner
 from utils import lineplot, write_video, imagine_ahead, lambda_return, compute_intrinsic_reward, FreezeParameters, ActivateParameters
 from tensorboardX import SummaryWriter
 
+import wandb
 
+
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 
 # Hyperparameters
@@ -36,7 +41,7 @@ parser.add_argument('--belief-size', type=int, default=400, metavar='H', help='B
 parser.add_argument('--state-size', type=int, default=60, metavar='Z', help='State/latent size')
 parser.add_argument('--action-repeat', type=int, default=2, metavar='R', help='Action repeat')
 parser.add_argument('--action-noise', type=float, default=0.3, metavar='ε', help='Action noise')
-parser.add_argument('--episodes', type=int, default=3000, metavar='E', help='Total number of episodes')
+parser.add_argument('--episodes', type=int, default=500, metavar='E', help='Total number of episodes') # Default is 3000
 parser.add_argument('--seed-episodes', type=int, default=5, metavar='S', help='Seed episodes')
 parser.add_argument('--collect-interval', type=int, default=100, metavar='C', help='Collect interval')
 parser.add_argument('--batch-size', type=int, default=49, metavar='B', help='Batch size')
@@ -86,16 +91,18 @@ for k, v in vars(args).items():
   print(' ' * 26 + k + ': ' + str(v))
 
 
+############ WandB Init ############
+wandb.init(project="plann-to-the-moin")
 
 ############ SETUP ############
 results_dir = os.path.join('results', '{}_{}'.format(args.env, args.id))
 os.makedirs(results_dir, exist_ok=True)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
-if torch.backends.mps.is_available() and not args.disable_cuda:
+if torch.cuda.is_available() and not args.disable_cuda:
   print("using CUDA")
-  args.device = torch.device('mps')
-  # torch.cuda.manual_seed(args.seed)
+  args.device = torch.device('cuda')
+  torch.cuda.manual_seed(args.seed)
 else:
   print("using CPU")
   args.device = torch.device('cpu')
@@ -142,8 +149,8 @@ if args.algo=="dreamer" or args.algo=="p2e":
 if args.algo=="p2e":
   curious_actor_model = ActorModel(args.belief_size, args.state_size, args.hidden_size, env.action_size, args.dense_activation_function).to(device=args.device)
   curious_value_model = ValueModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
-  # onestep_models = [OneStepModel(args.belief_size, env.action_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
-  onestep_models = [OneStepModel(args.belief_size, args.belief_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)] #@change
+  #onestep_models = [OneStepModel(args.belief_size, env.action_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
+  onestep_models = [OneStepModel(args.belief_size, args.belief_size, args.embedding_size, args.onestep_activation_function).to(device=args.device) for _ in range(args.onestep_num)]
   onestep_param_list = []
   for x in onestep_models: onestep_param_list += list(x.parameters())
   onestep_modules = []
@@ -304,10 +311,10 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
         onestep_actions = actions.detach()
         onestep_obs = observations.detach()
         onestep_beliefs = beliefs.detach()
-      
+        
       first_belief = onestep_beliefs[1:]
       second_belief = onestep_beliefs[:-1]
-
+      
       onestep_batch_size = onestep_actions.size(1)
       action_feature_size = onestep_actions.size(2)
       obs_feature_size = args.embedding_size
@@ -330,16 +337,16 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
         input_state_first = torch.gather(first_belief, 0, belief_indices)
         input_state_second = torch.gather(second_belief, 0, belief_indices)
         # target_prediction = torch.gather(onestep_embed, 0, pred_indices)
+
         target_prediction = torch.gather(onestep_embed, 0, pred_indices)
+        target_action_prediction = torch.gather(onestep_actions, 0, action_indices)
+
         target_action_prediction = torch.gather(onestep_actions, 0, action_indices)
 
         # print("--->", input_state[:-1].shape, input_state[1:].shape, input_action.shape)
         # prediction = onestep_models[mdl](input_state[-1:], input_action)
-        print(f"input shape is {input_state_first.shape, input_state_second.shape}")
-        prediction = onestep_models[mdl](input_state_first, input_state_second)
+        prediction = onestep_models[mdl](input_state_first, input_state_second)       
         prediction = prediction.mean
-        print("------+++++----->", target_action_prediction.shape, prediction.shape)
-
         loss = ((prediction - target_action_prediction.detach()) ** 2).mean(axis=[0,1])
         loss *= args.ensemble_loss_scale
         onestep_loss = loss.mean()
@@ -359,7 +366,6 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
       with FreezeParameters(model_modules + value_model.modules + onestep_modules):
         curious_reward = compute_intrinsic_reward(curious_imged_beliefs[1:], curious_imged_beliefs[:-1], onestep_models) # @change for implementation of inverse module
         curious_value_pred = bottle(value_model, (curious_imged_beliefs, curious_imged_prior_states))
-
       curious_returns = lambda_return(curious_reward, curious_value_pred[:-1], bootstrap=curious_value_pred[:-1][-1], discount=args.discount, lambda_=args.disclam)
       curious_actor_loss = -torch.mean(curious_returns)
       # Update model parameters
@@ -485,6 +491,8 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
     metrics['episodes'].append(episode)
     metrics['train_rewards'].append(total_reward)
     lineplot(metrics['episodes'][-len(metrics['train_rewards']):], metrics['train_rewards'], 'train_rewards', results_dir)
+    wandb.log({"episodes": metrics['episodes']})
+    wandb.log({"train_episode": episode})
 
 
   # Test model
@@ -536,7 +544,9 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
     torch.save(metrics, os.path.join(results_dir, 'metrics.pth'))
     test_reward_sum = sum(metrics['test_rewards'][-1])
     writer.add_scalar("test/episode_reward", test_reward_sum/args.test_episodes, metrics['steps'][-1]*args.action_repeat)
-
+    wandb.log({"test_episodes": metrics['test_episodes']})
+    wandb.log({"test_episode": episode/args.test_interval})
+    wandb.log({"test/episode_reward": test_reward_sum/args.test_episodes})
     # Set models to train mode
     transition_model.train()
     observation_model.train()
@@ -562,6 +572,10 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
   writer.add_scalar("curious_actor_loss", metrics['curious_actor_loss'][-1][0], metrics['steps'][-1]) 
   writer.add_scalar("curious_value_loss", metrics['curious_value_loss'][-1][0], metrics['steps'][-1]) 
   print("episodes: {}, total_steps: {}, train_reward: {} ".format(metrics['episodes'][-1], metrics['steps'][-1], metrics['train_rewards'][-1]))
+  
+  # log to WandB
+  wandb.log({"train_reward": metrics['train_rewards'][-1], "train/episode_reward": metrics['train_rewards'][-1], "observation_loss": metrics['observation_loss'][-1][0], "reward_loss": metrics['reward_loss'][-1][0], "kl_loss": metrics['kl_loss'][-1][0], "actor_loss": metrics['actor_loss'][-1][0],
+             "value_loss": metrics['value_loss'][-1][0], "onestep_loss": metrics['onestep_loss'][-1][0], "curious_actor_loss": metrics['curious_actor_loss'][-1][0], "curious_value_loss": metrics['curious_value_loss'][-1][0]})
 
   # Checkpoint models
   if episode % args.checkpoint_interval == 0:

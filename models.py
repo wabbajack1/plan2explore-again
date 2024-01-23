@@ -101,7 +101,7 @@ class TransitionModel(jit.ScriptModule):
 #     dist = Normal(mean, torch.zeros_like(mean).to('mps') + 1e05)
 #     dist = torch.distributions.Independent(dist, 1)
 #     return dist
-  
+
 # class OneStepModel(jit.ScriptModule):
 #   def __init__(self, state_size, action_size, embedding_size, activation_function='relu', model_width_factor=1, min_std=1e-4, init_std=5, mean_scale=5, dist='tanh_normal'):
 #     super().__init__()
@@ -143,8 +143,9 @@ class TransitionModel(jit.ScriptModule):
 #     dist = torch.distributions.Independent(dist, 1)
 
 #     return dist
-  
+
 # old implementation
+
 class OneStepModel(jit.ScriptModule):
   def __init__(self, state_size, action_size, embedding_size, activation_function='relu', model_width_factor=1):
     super().__init__()
@@ -165,7 +166,7 @@ class OneStepModel(jit.ScriptModule):
     hidden = self.act_fn(self.fc2(hidden))
     hidden = torch.cat([hidden, prev_action], dim=-1) 
     mean = self.fc3(hidden)
-    dist = Normal(mean, torch.zeros_like(mean).to('mps') + 1e05)
+    dist = Normal(mean, torch.zeros_like(mean).to('cuda') + 1e05)
     dist = torch.distributions.Independent(dist, 1)
     return dist
 
@@ -289,7 +290,7 @@ class ActorModel(jit.ScriptModule):
     dist = Normal(action_mean, action_std)
     dist = TransformedDistribution(dist, TanhBijector())
     dist = torch.distributions.Independent(dist,1)
-    dist = SampleDist(dist)
+    dist =  SampleDist(dist)
     if det: return dist.mode()
     else: return dist.rsample()
 
